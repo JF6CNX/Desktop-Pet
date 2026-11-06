@@ -1,0 +1,27 @@
+{
+ "CAP": [
+  44,
+  34,
+  31
+ ],
+ "OUTLINE_W": 0.6,
+ "EYE_GAP": 19,
+ "EYE_LEN": 32,
+ "EYE_Y": 3.5,
+ "EYE_TILT": 3.5,
+ "MOUTH": "w",
+ "MOUTH_Y": 2.5,
+ "MOLE_X": 17.5,
+ "MOLE_Y": -4,
+ "MOLE_SIZE": 0.9,
+ "HACHI_TOP": -0.4,
+ "HACHI_SIDE": 0.15,
+ "PANTS": [
+  0,
+  0,
+  0
+ ],
+ "HEAD_W": 35,
+ "EAR_H": 24,
+ "EAR_SIZE": 1.2
+}

@@ -1,0 +1,75 @@
+{
+ "theme": "lab",
+ "items": [
+  {
+   "type": "lab_books",
+   "x": 28.0,
+   "y": 86
+  },
+  {
+   "type": "lab_papers",
+   "x": 22.0,
+   "y": 122
+  },
+  {
+   "type": "lab_pens",
+   "x": 189.0,
+   "y": 93.0
+  },
+  {
+   "type": "lab_supple",
+   "x": 219.0,
+   "y": 89
+  },
+  {
+   "type": "lab_cup",
+   "x": 231.0,
+   "y": 91
+  },
+  {
+   "type": "lab_tumbler",
+   "x": 243.0,
+   "y": 89
+  },
+  {
+   "type": "lab_pet",
+   "x": 257.0,
+   "y": 91
+  },
+  {
+   "type": "lab_lemon",
+   "x": 194.0,
+   "y": 118
+  },
+  {
+   "type": "lab_numpad",
+   "x": 214.0,
+   "y": 116
+  },
+  {
+   "type": "lab_tape",
+   "x": 236.0,
+   "y": 118
+  },
+  {
+   "type": "lab_earphone",
+   "x": 251.0,
+   "y": 119
+  },
+  {
+   "type": "husky",
+   "x": 232.0,
+   "y": 100.0
+  },
+  {
+   "type": "fudeneko",
+   "x": 52,
+   "y": 79
+  },
+  {
+   "type": "custom:c1793945478171",
+   "x": 222.0,
+   "y": 70
+  }
+ ]
+}
