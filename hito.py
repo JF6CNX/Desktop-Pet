@@ -14,8 +14,9 @@ import os
 
 from PIL import Image, ImageChops, ImageDraw
 
+import paths
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "hito.png")
+SRC = paths.res("hito.png")
 
 SF = 0.16                   # 絵の 1px → ペットの絵の何 px か（大きさ）
 HEAD_SCALE = 1.2            # 頭だけの大きさ（2.5頭身にするため、体より大きめ）

@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 app_settings.json
 preview*.png
+build/
+dist/

@@ -1,8 +1,6 @@
 """
-自作の画像を使う：小物・キャラの追加と、自作のメインキャラ（頭・体・手などのパーツ）
+自作のメインキャラ（頭・体・手などのパーツの画像を、Live2D 風に動かす）
 
-  custom/                 … 追加した画像（コピーしておく）
-  custom/custom.json      … 追加した小物・キャラの一覧
   custom/chara/           … 自作メインキャラのパーツ画像
   custom/chara/chara.json … パーツの「点」（首のつけねなど）や大きさ
 
@@ -11,13 +9,12 @@
 import json
 import os
 import shutil
-import time
 
 from PIL import Image, ImageChops, ImageDraw
 
+import paths
 HERE = os.path.dirname(os.path.abspath(__file__))
-CDIR = os.path.join(HERE, "custom")
-REG = os.path.join(CDIR, "custom.json")
+CDIR = paths.app("custom")
 CHARA_DIR = os.path.join(CDIR, "chara")
 CHARA_JSON = os.path.join(CHARA_DIR, "chara.json")
 
@@ -54,63 +51,6 @@ def _copy_in(src, folder, stem):
     if os.path.abspath(src) != os.path.abspath(dst):
         shutil.copyfile(src, dst)
     return os.path.basename(dst)
-
-
-# ============================================================
-#  小物・キャラ（机の上やうしろに置くもの）
-# ============================================================
-def load_items():
-    try:
-        with open(REG, encoding="utf-8") as f:
-            return [e for e in json.load(f) if os.path.exists(os.path.join(CDIR, e["file"]))]
-    except (OSError, ValueError, KeyError, TypeError):
-        return []
-
-
-def save_items(items):
-    os.makedirs(CDIR, exist_ok=True)
-    with open(REG, "w", encoding="utf-8") as f:
-        json.dump(items, f, ensure_ascii=False, indent=1)
-
-
-def add_item(src, name, kind, height):
-    """画像をコピーして登録する。kind: "item"（机の上の小物） / "chara"（机の奥からのぞけるキャラ）"""
-    items = load_items()
-    iid = "c%d" % int(time.time() * 1000)
-    entry = {"id": iid, "name": name, "kind": kind, "height": int(height),
-             "file": _copy_in(src, CDIR, iid)}
-    items.append(entry)
-    save_items(items)
-    return entry
-
-
-def remove_item(iid):
-    items = load_items()
-    for e in items:
-        if e["id"] == iid:
-            try:
-                os.remove(os.path.join(CDIR, e["file"]))
-            except OSError:
-                pass
-    save_items([e for e in items if e["id"] != iid])
-
-
-def set_item_height(iid, height):
-    items = load_items()
-    for e in items:
-        if e["id"] == iid:
-            e["height"] = int(height)
-    save_items(items)
-
-
-def item_sprite(entry, k):
-    """小物の画像を、高さ entry["height"]（ペットの絵の px）にしたもの と 足もと（下のまんなか）の x"""
-    im = cutout(os.path.join(CDIR, entry["file"]))
-    bb = im.getchannel("A").getbbox() or (0, 0, im.width, im.height)
-    im = im.crop(bb)
-    sc = entry["height"] * k / max(1, im.height)
-    im = im.resize((max(1, int(im.width * sc)), max(1, int(im.height * sc))), LANCZOS)
-    return im, im.width / 2
 
 
 # ============================================================

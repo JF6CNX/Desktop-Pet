@@ -24,40 +24,12 @@ import tkinter as tk
 from PIL import Image, ImageChops, ImageDraw, ImageFont, ImageTk
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import importlib
+import paths
 import json
 from tkinter import colorchooser, ttk
-import neko_design as N
 import hito
 import jisaku
-from tkinter import filedialog, simpledialog, messagebox
-
-_design = {"mtime": None, "checked": 0.0}
-
-
-def reload_design(art):
-    """neko_design.py が保存されたら読みなおす（1秒に1回だけ確かめる）"""
-    global N
-    now = time.time()
-    if now - _design["checked"] < 1.0:
-        return
-    _design["checked"] = now
-    try:
-        mtime = os.path.getmtime(N.__file__)
-    except OSError:
-        return
-    if _design["mtime"] is None:
-        _design["mtime"] = mtime
-        return
-    if mtime != _design["mtime"]:
-        _design["mtime"] = mtime
-        try:
-            N = importlib.reload(N)
-        except Exception as e:                    # 書きまちがい → 前の見た目のまま
-            print("neko_design.py の読みこみでエラー:", e, file=sys.stderr)
-            return
-        for a in ART_INSTANCES:
-            a._body.clear()
+from tkinter import filedialog, messagebox
 
 LANCZOS = getattr(Image, "Resampling", Image).LANCZOS
 KEY = (1, 2, 3)            # 透過に使う色
@@ -71,7 +43,6 @@ BODY = (255, 222, 172)        # 小麦色のねこ
 STRIPE = (226, 156, 92)
 EAR_IN = (255, 178, 190)
 NOSE = (240, 120, 140)
-# ねこの色・形は neko_design.py にあります
 BELLY = (255, 246, 230)
 CHEEK = (255, 168, 182)
 LEAF = (126, 204, 112)
@@ -264,9 +235,9 @@ HOME_R = key_center(SC2IDX[0x21])
 # ============================================================
 ART_INSTANCES = []
 TOP_M = 18                # 上のよゆう（ジャンプしても頭がはみ出ないように）
-APP_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "app_settings.json")
+APP_FILE = paths.app("app_settings.json")
 APP_DEFAULTS = {"size": 100, "topmost": True, "locked": False, "typing": True, "mouse": True,
-                "sleep_min": 1, "hint_done": False, "pos": None,
+                "sleep_min": 1, "pos": None, "chars": ["person"],
                 "hand": {"sh_x": 0, "sh_y": 0, "rest_x": 0, "rest_y": 0}}
 STARTUP_FILE = os.path.join(os.environ.get("APPDATA", ""), "Microsoft", "Windows", "Start Menu",
                             "Programs", "Startup", "desktop_pet.cmd")
@@ -298,9 +269,8 @@ def set_autostart(on):
     """Windows の「スタートアップ」フォルダに起動用のファイルを置く／消す"""
     try:
         if on:
-            script = os.path.abspath(__file__)
             with open(STARTUP_FILE, "w", encoding="cp932", errors="replace") as f:
-                f.write('@start "" pythonw "%s"\r\n' % script)
+                f.write(paths.launch_command() + "\r\n")
         elif os.path.exists(STARTUP_FILE):
             os.remove(STARTUP_FILE)
     except OSError:
@@ -316,8 +286,12 @@ HITO_NECK_Y = 57          # ひとの首の高さ（これより下の体は机�
 CUSTOM = jisaku.load_chara()       # 自作キャラの設定（パーツの点など）
 
 
+CURRENT_CHAR = "person"            # いま動かしている（かいている）ペットのキャラ："person" / "custom"
+CHAR_NAMES = {"person": "ひと", "custom": "自作キャラ"}
+
+
 def is_custom():
-    return getattr(N, "CHARACTER", "cat") == "custom"
+    return CURRENT_CHAR == "custom"
 
 
 def char_neck_y():
@@ -325,7 +299,7 @@ def char_neck_y():
 
 
 def is_person():
-    return getattr(N, "CHARACTER", "cat") in ("person", "custom")
+    return True                    # ねこキャラはなくなったので、いつも「絵のキャラ」
 
 
 # 手の位置の調整（設定画面の「手の位置」）。肩：はば・高さ、休めている手：はば・高さ
@@ -351,7 +325,7 @@ def rest_pos():
         l, r = REST_L, REST_R
     dx, dy = HAND["rest_x"], HAND["rest_y"]
     return (l[0] - dx, l[1] + dy), (r[0] + dx, r[1] + dy)
-LAYOUT_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)), "layout.json")
+LAYOUT_FILE = paths.app("layout.json")
 
 
 def load_layout():
@@ -580,8 +554,6 @@ class Art:
     def peeking(self, it):
         return self.ITEM_DEFS[it["type"]][5] == "chara" and it["y"] <= self.PEEK_Y
 
-    CUSTOM_ITEMS = {}                 # "custom:id" → jisaku の登録データ
-
     def draw_item(self, d, it, part="all"):
         name, x0, y0, extra, fn, cat = self.ITEM_DEFS[it["type"]]
         self.ox, self.oy = it["x"] - x0, it["y"] - y0
@@ -589,28 +561,7 @@ class Art:
         self.ox = self.oy = 0.0
 
     def _call_item(self, d, kind, part):
-        fn = self.ITEM_DEFS[kind][4]
-        if fn == "it_custom":
-            self.it_custom(d, kind, part)
-        else:
-            getattr(self, fn)(d, part)
-
-    def it_custom(self, d, kind, part):
-        """自作の画像の小物・キャラ。足もと（下のまんなか）を置いた場所に"""
-        e = self.CUSTOM_ITEMS.get(kind)
-        if not e or part == "paws":
-            return
-        cache = self.__dict__.setdefault("_sprites", {})
-        key = (kind, e["height"])
-        if key not in cache:
-            try:
-                cache[key] = jisaku.item_sprite(e, self.k)
-            except OSError:
-                return
-        spr, fx = cache[key]
-        name, x0, y0, extra, fn, cat = self.ITEM_DEFS[kind]
-        bottom = y0 + self.oy + (16 if part == "head" else 0)
-        d._image.paste(spr, (int(self.P(x0 + self.ox) - fx), int(self.P(bottom) - spr.height)), spr)
+        getattr(self, self.ITEM_DEFS[kind][4])(d, part)
 
     def desk_items(self, d):
         for it in sorted(self.layout, key=lambda i: i["y"]):
@@ -815,7 +766,7 @@ class Art:
         cache = self.__dict__.setdefault("_sprites", {})
         if name not in cache:
             fname, box, foot, height = self.SPRITES[name]
-            src = Image.open(os.path.join(os.path.dirname(os.path.abspath(__file__)), fname)).convert("RGB")
+            src = Image.open(paths.res(fname)).convert("RGB")
             for c in ((0, 0), (src.width - 1, 0), (0, src.height - 1), (src.width - 1, src.height - 1)):
                 ImageDraw.floodfill(src, c, (255, 0, 255), thresh=30)
             mask = ImageChops.difference(src, Image.new("RGB", src.size, (255, 0, 255))).convert("L").point(
@@ -914,9 +865,8 @@ class Art:
 
     # 体（腕なし）。eyes/fx/breath/sway/z でキャッシュ
     def body(self, eyes, fx, breath, sway, z, flap=0):
-        """ねこ（腕なし）。見た目は neko_design.py で決める"""
-        reload_design(self)
-        key = (eyes, fx, breath, sway, z, flap if is_person() else 0)
+        """キャラの体（腕なし）。ペットごとのキャラ（CURRENT_CHAR）でかく"""
+        key = (CURRENT_CHAR, eyes, fx, breath, sway, z, flap)
         if key in self._body:
             return self._body[key]
         im = self.blank.copy()
@@ -934,8 +884,6 @@ class Art:
                 self._hito = hito.Hito(self.k)
             self._hito.render(self, im, CX, HITO_NECK_Y, eyes, fx, breath, sway, flap)
             d = ImageDraw.Draw(im)
-        elif not is_person():
-            d = N.draw_body(self, im, d, eyes, fx, breath, sway, CX) or d
         if z is not None:
             drift = z * 2
             d.text((self.P(CX - 66), self.P(26 - drift)), "Z", font=self.font_b, fill=ZZZ)
@@ -1020,23 +968,6 @@ class Art:
                     d = ImageDraw.Draw(im)
                 else:
                     self.ell(d, px, py + (1 if down else 0), 5.6, 4.2 if down else 5, c["skin"], ol=c["line"], w=1.6)
-        else:
-            for side, paw, down in ((-1, sc["pl"], sc["lp"]), (1, sc["pr"], sc["rp"])):
-                sx, sy = shoulders()[0 if side < 0 else 1]
-                sy += dy
-                px, py = paw[0] / 2, paw[1] / 2
-                self.line(d, [(sx, sy), (px, py)], fill=N.OUTLINE, w=N.arm_widths()[0])
-                self.ell(d, sx, sy, N.arm_widths()[0] / 2, N.arm_widths()[0] / 2, N.OUTLINE, ol=None)
-            for side, paw, down in ((-1, sc["pl"], sc["lp"]), (1, sc["pr"], sc["rp"])):
-                sx, sy = shoulders()[0 if side < 0 else 1]
-                sy += dy
-                px, py = paw[0] / 2, paw[1] / 2
-                self.line(d, [(sx, sy), (px, py)], fill=N.sleeve_color(), w=N.arm_widths()[1])
-                self.ell(d, sx, sy, N.arm_widths()[1] / 2, N.arm_widths()[1] / 2, N.sleeve_color(), ol=None)
-                if down:                             # 手先は白いくつした
-                    self.ell(d, px, py + 1, 5.5, 3.8, N.paw_color(), ol=N.OUTLINE, w=N.OUTLINE_W)
-                else:
-                    self.ell(d, px, py, 5.5, 4.6, N.paw_color(), ol=N.OUTLINE, w=N.OUTLINE_W)
 
         if sc.get("edit"):
             for it in self.layout:
@@ -1049,13 +980,6 @@ class Art:
                         q = (a_[0] + (b_[0] - a_[0]) * (i + 1) / n, a_[1] + (b_[1] - a_[1]) * (i + 1) / n)
                         self.line(d, [p, q], fill=col, w=1.2)
             d.text((self.P(4), self.P(2 + TOP_M)), "もようがえ中", font=self.font_j, fill=(230, 60, 90))
-
-        if sc.get("hint"):
-            lines = ["右クリック：メニュー", "ダブルクリック：設定", "ドラッグ：つかんで動かす"]
-            bx0, by0 = CX + 52, 3
-            self.rrect(d, (bx0, by0, bx0 + 90, by0 + 31), 4, (255, 255, 250), ol=(120, 120, 130), w=1)
-            for i, t in enumerate(lines):
-                d.text((self.P(bx0 + 4), self.P(TOP_M + by0 + 2.5 + i * 9)), t, font=self.font_h, fill=(60, 60, 70))
 
         self.ox, self.oy = 0.0, 0.0
         small = im.resize((self.W, self.H), LANCZOS)
@@ -1158,26 +1082,11 @@ def clamp(v, lo, hi):
 # ============================================================
 #  ペット
 # ============================================================
-def register_custom_items():
-    """自作の小物・キャラを、出せる小物の一覧に入れる"""
-    for k in [k for k in Art.ITEM_DEFS if k.startswith("custom:")]:
-        del Art.ITEM_DEFS[k]
-    Art.CUSTOM_ITEMS.clear()
-    for e in jisaku.load_items():
-        key = "custom:" + e["id"]
-        if e["kind"] == "chara":
-            Art.ITEM_DEFS[key] = (e["name"], 96, 79, 0, "it_custom", "chara")
-        else:
-            Art.ITEM_DEFS[key] = (e["name"], 226, 104, (104 - DESK_FAR[2]) * SKEW, "it_custom", "custom")
-        Art.CUSTOM_ITEMS[key] = e
-
-
-register_custom_items()
-
-
 class Pet:
-    def __init__(self, app):
+    def __init__(self, app, char="person"):
+        global CURRENT_CHAR
         self.app = app
+        self.char = CURRENT_CHAR = char
         art = app.art
         self.W, self.H = art.W, art.H
         self.win = tk.Toplevel(app.root)
@@ -1221,7 +1130,7 @@ class Pet:
 
         def fill_add():
             add.delete(0, "end")
-            for group, gname in (("chara", "キャラ"), ("wa", "和風"), ("lab", "研究室"), ("custom", "自作の小物")):
+            for group, gname in (("chara", "キャラ"), ("wa", "和風"), ("lab", "研究室")):
                 sm = tk.Menu(add, tearoff=0)
                 for kind, d_ in Art.ITEM_DEFS.items():
                     if d_[5] == group:
@@ -1234,6 +1143,17 @@ class Pet:
         m.add_separator()
         m.add_command(label="ねる", command=self.go_sleep)
         m.add_command(label="ジャンプ", command=lambda: self.set_state("happy", 24))
+        m.add_separator()
+        cm = tk.Menu(m, tearoff=0)
+        self.char_var = tk.StringVar(value=self.char)
+        for key, label in CHAR_NAMES.items():
+            cm.add_radiobutton(label=label, value=key, variable=self.char_var,
+                               command=lambda: app.set_pet_char(self, self.char_var.get()))
+        m.add_cascade(label="この子のキャラ", menu=cm)
+        call = tk.Menu(m, tearoff=0)
+        for key, label in CHAR_NAMES.items():
+            call.add_command(label=label, command=lambda k=key: app.add_pet(k))
+        m.add_cascade(label="もう1人よぶ", menu=call)
         m.add_separator()
         m.add_command(label="この子をしまう", command=self.close)
         m.add_command(label="ぜんぶ終了", command=app.quit)
@@ -1329,6 +1249,8 @@ class Pet:
 
     # ---- 毎フレーム ----
     def update(self):
+        global CURRENT_CHAR
+        CURRENT_CHAR = self.char
         app = self.app
         now = time.time()
         self.tick += 1
@@ -1449,7 +1371,6 @@ class Pet:
             "lb": app.lb, "rb": app.rb,
             "flap": (self.tick // (5 if s == "sleep" else 3)) % 8 if is_person() else 0,
             "edit": app.edit_var.get(), "held": self.held[0] if self.held else None,
-            "hint": now < app.hint_until,
             "ver": app.layout_ver,
         }
 
@@ -1473,6 +1394,8 @@ class Pet:
             self.app.pets.remove(self)
         if not self.app.pets:
             self.app.quit()
+            return
+        self.app.save_chars()
 
 
 class App:
@@ -1490,7 +1413,6 @@ class App:
         self.typing_var.trace_add("write", lambda *a: self.set_cfg("typing", self.typing_var.get()))
         self.mouse_var.trace_add("write", lambda *a: self.set_cfg("mouse", self.mouse_var.get()))
         self.settings = None
-        self.hint_until = 0.0 if self.cfg["hint_done"] else time.time() + 15
         self.last_key = self.last_mouse = 0.0
         self.prev_down = set()
         self.down_idx = set()
@@ -1504,18 +1426,17 @@ class App:
         self.theme_var = tk.StringVar(value=self.art.theme)
         self.layout_dirty = False
         self.layout_ver = 0
-        self.look = None
         self.pets = []
-        for _ in range(n):
-            self.add_pet()
+        chars = [c for c in (self.cfg.get("chars") or []) if c in CHAR_NAMES] or ["person"]
+        chars += ["person"] * (n - len(chars))
+        for c in chars:
+            self.add_pet(c, save=False)
         if self.cfg["pos"] and self.pets:              # 前に置いていた場所から始める
             p = self.pets[0]
             sx, sy = self.cfg["pos"][0], self.cfg["pos"][1]
             l, t, r, b = monitor_workarea(sx + p.W / 2, sy + p.H / 2, self.workarea)   # その場所のモニター
             p.x, p.y = float(clamp(sx, l, max(l, r - p.W))), float(sy)
             p.y, p.vx, p.state = p.ground, 0.0, "idle"
-        if not self.cfg["hint_done"]:
-            self.set_cfg("hint_done", True)
         self.loop_count = 0
         self.root.after(33, self.loop)
 
@@ -1523,8 +1444,26 @@ class App:
     def last_input(self):
         return max(self.last_key, self.last_mouse)
 
-    def add_pet(self):
-        self.pets.append(Pet(self))
+    def add_pet(self, char="person", save=True):
+        self.pets.append(Pet(self, char))
+        if save:
+            self.save_chars()
+        if self.settings and self.settings.win.winfo_exists():
+            self.settings.fill_chars()
+
+    def save_chars(self):
+        self.set_cfg("chars", [p.char for p in self.pets])
+
+    def set_pet_char(self, pet, char):
+        """このペットのキャラを変える"""
+        global CURRENT_CHAR
+        pet.char = CURRENT_CHAR = char
+        pet.char_var.set(char)
+        pet.pl, pet.pr = list(rest_pos()[0]), list(rest_pos()[1])
+        pet.shown = None
+        self.save_chars()
+        if self.settings and self.settings.win.winfo_exists():
+            self.settings.fill_chars()
 
     # ---- 設定 ----
     def set_cfg(self, key, value):
@@ -1550,6 +1489,7 @@ class App:
             return
         self.set_cfg("size", pct)
         old = [(p.x + p.W / 2, p.y + p.H) for p in self.pets]
+        chars = [p.char for p in self.pets]
         for p in list(self.pets):
             p.win.destroy()
         self.pets = []
@@ -1559,8 +1499,8 @@ class App:
         self.art = Art(self.dpi * pct / 100)
         self.art.theme, self.art.layout = theme, layout
         self.art.rebuild()
-        for o in old or [None]:
-            self.add_pet()
+        for i, o in enumerate(old or [None]):
+            self.add_pet(chars[i] if i < len(chars) else "person", save=False)
             p = self.pets[-1]
             if o is not None:
                 cxp, bottom = o
@@ -1568,15 +1508,7 @@ class App:
                 p.x, p.y = float(clamp(cxp - p.W / 2, l, max(l, r - p.W))), float(bottom - p.H)
                 p.y, p.vx, p.state = p.ground, 0.0, "idle"
 
-    # ---- 自作 ----
-    def custom_items_changed(self):
-        register_custom_items()
-        self.art.layout[:] = [i for i in self.art.layout if i["type"] in Art.ITEM_DEFS]
-        self.art.item_box = {k: v for k, v in self.art.item_box.items() if not k.startswith("custom:")}
-        self.art.__dict__.get("_sprites", {}).clear()
-        save_layout(self.art)
-        self.layout_dirty = True
-
+    # ---- 自作キャラ ----
     def open_chara_editor(self):
         if getattr(self, "chara_ed", None) and self.chara_ed.win.winfo_exists():
             self.chara_ed.win.lift()
@@ -1584,16 +1516,18 @@ class App:
         self.chara_ed = CharaEditor(self)
 
     def set_hand(self, key, value):
+        global CURRENT_CHAR
         HAND[key] = value
         self.set_cfg("hand", dict(HAND))
-        rl, rr = rest_pos()
         for p in self.pets:
-            p.pl, p.pr = list(rl), list(rr)
+            CURRENT_CHAR = p.char
+            p.pl, p.pr = list(rest_pos()[0]), list(rest_pos()[1])
         self.redraw_all()
 
     def set_character(self, kind):
-        N.save_settings({"CHARACTER": kind})
-        self.design_changed()
+        """1人目のキャラを変える"""
+        if self.pets:
+            self.set_pet_char(self.pets[0], kind)
 
     # ---- もようがえ ----
     def edit_changed(self):
@@ -1634,12 +1568,6 @@ class App:
             p.shown = None
 
     # ---- ねこのみため ----
-    def open_look(self):
-        if self.look and self.look.win.winfo_exists():
-            self.look.win.lift()
-            return
-        self.look = LookEditor(self)
-
     def design_changed(self):
         global CUSTOM
         CUSTOM = jisaku.load_chara()
@@ -1648,9 +1576,10 @@ class App:
             a._custom = None
         self.layout_dirty = True                 # いすの向きもキャラに合わせてかきなおす
         self.redraw_all()
-        rl, rr = rest_pos()
+        global CURRENT_CHAR
         for p in self.pets:
-            p.pl, p.pr = list(rl), list(rr)
+            CURRENT_CHAR = p.char
+            p.pl, p.pr = list(rest_pos()[0]), list(rest_pos()[1])
 
     def poll(self):
         now = time.time()
@@ -1795,13 +1724,15 @@ class SettingsWindow:
         # ---- キャラ ----
         t = ttk.Frame(nb)
         nb.add(t, text="キャラ")
-        ttk.Label(t, text="キャラ").grid(row=0, column=0, sticky="w", **pad)
-        self.chara = tk.StringVar(value=getattr(N, "CHARACTER", "person"))
-        for j, (label, val) in enumerate((("ひと", "person"), ("ねこ", "cat"), ("自作", "custom"))):
-            ttk.Radiobutton(t, text=label, value=val, variable=self.chara,
-                            command=lambda: app.set_character(self.chara.get())).grid(row=0, column=1 + j, sticky="w")
-        ttk.Button(t, text="ねこのみためを変える…", command=app.open_look).grid(row=1, column=0, columnspan=3, sticky="w", **pad)
-        ttk.Button(t, text="もう1人よぶ", command=app.add_pet).grid(row=2, column=0, columnspan=3, sticky="w", **pad)
+        self.chars_box = ttk.LabelFrame(t, text="ペットとキャラ")
+        self.chars_box.grid(row=0, column=0, columnspan=4, sticky="we", **pad)
+        self.fill_chars()
+        bar = ttk.Frame(t)
+        bar.grid(row=1, column=0, columnspan=4, sticky="w", **pad)
+        ttk.Label(bar, text="もう1人よぶ：").pack(side="left")
+        for key, label in CHAR_NAMES.items():
+            ttk.Button(bar, text=label, command=lambda k=key: app.add_pet(k)).pack(side="left", padx=2)
+        ttk.Button(t, text="自作キャラを作る…", command=app.open_chara_editor).grid(row=2, column=0, sticky="w", **pad)
         hf = ttk.LabelFrame(t, text="手の位置")
         hf.grid(row=3, column=0, columnspan=4, sticky="we", **pad)
         self.hand = {}
@@ -1817,106 +1748,34 @@ class SettingsWindow:
             self.hand[key] = v
         ttk.Button(hf, text="手の位置をもとにもどす", command=self.reset_hand).grid(row=4, column=0, sticky="w", padx=6, pady=4)
 
-        # ---- 自作 ----
-        t = ttk.Frame(nb)
-        nb.add(t, text="自作")
-        ttk.Label(t, text="自分でかいた画像（PNG。背景はすきとおり か まっ白）を使えます",
-                  foreground="#555").grid(row=0, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Label(t, text="小物・キャラ").grid(row=1, column=0, sticky="w", **pad)
-        self.tree = ttk.Treeview(t, columns=("kind", "h"), height=5, selectmode="browse")
-        self.tree.heading("#0", text="名前")
-        self.tree.heading("kind", text="しゅるい")
-        self.tree.heading("h", text="高さ")
-        self.tree.column("#0", width=150)
-        self.tree.column("kind", width=110)
-        self.tree.column("h", width=50, anchor="e")
-        self.tree.grid(row=2, column=0, columnspan=4, sticky="we", padx=8)
-        bar = ttk.Frame(t)
-        bar.grid(row=3, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Button(bar, text="画像を追加…", command=self.add_custom).pack(side="left", padx=2)
-        ttk.Button(bar, text="出す", command=self.place_custom).pack(side="left", padx=2)
-        ttk.Button(bar, text="大きさを変える…", command=self.resize_custom).pack(side="left", padx=2)
-        ttk.Button(bar, text="けす", command=self.remove_custom).pack(side="left", padx=2)
-        ttk.Separator(t).grid(row=4, column=0, columnspan=4, sticky="we", pady=6)
-        ttk.Label(t, text="自作のメインキャラ（頭・体・手などのパーツをかいて動かす）").grid(
-            row=5, column=0, columnspan=4, sticky="w", **pad)
-        ttk.Button(t, text="自作キャラを作る…", command=app.open_chara_editor).grid(row=6, column=0, sticky="w", **pad)
-        self.fill_tree()
 
         bot = ttk.Frame(w)
         bot.pack(fill="x", padx=8, pady=(0, 8))
         ttk.Button(bot, text="ペットをぜんぶ終了", command=app.quit).pack(side="left")
         ttk.Button(bot, text="とじる", command=w.destroy).pack(side="right")
 
-    GROUPS = {"chara": "キャラ", "wa": "和風", "lab": "研究室", "custom": "自作の小物"}
+    GROUPS = {"chara": "キャラ", "wa": "和風", "lab": "研究室"}
+
+    def fill_chars(self):
+        """ペットごとに、キャラをえらぶ行"""
+        for w_ in self.chars_box.winfo_children():
+            w_.destroy()
+        self.char_vars = []
+        for i, p in enumerate(self.app.pets):
+            ttk.Label(self.chars_box, text=f"{i + 1}人目").grid(row=i, column=0, sticky="w", padx=6, pady=2)
+            v = tk.StringVar(value=p.char)
+            for j, (key, label) in enumerate(CHAR_NAMES.items()):
+                ttk.Radiobutton(self.chars_box, text=label, value=key, variable=v,
+                                command=lambda p=p, v=v: self.app.set_pet_char(p, v.get())).grid(row=i, column=1 + j, sticky="w")
+            ttk.Button(self.chars_box, text="しまう", width=6,
+                       command=lambda p=p: (p.close(), self.fill_chars())).grid(row=i, column=4, padx=6)
+            self.char_vars.append(v)
 
     def fill_pick(self):
         self.kinds = [k for k in Art.ITEM_DEFS]
         self.pick.config(values=[f"{Art.ITEM_DEFS[k][0]}（{self.GROUPS[Art.ITEM_DEFS[k][5]]}）" for k in self.kinds])
         if self.pick.current() < 0 and self.kinds:
             self.pick.current(0)
-
-    def fill_tree(self):
-        self.tree.delete(*self.tree.get_children())
-        for e in jisaku.load_items():
-            kind = "キャラ（のぞける）" if e["kind"] == "chara" else "机の上の小物"
-            self.tree.insert("", "end", iid=e["id"], text=e["name"], values=(kind, e["height"]))
-
-    def selected_custom(self):
-        sel = self.tree.selection()
-        if not sel:
-            messagebox.showinfo("自作", "リストから1つえらんでください", parent=self.win)
-            return None
-        return sel[0]
-
-    def add_custom(self):
-        path = filedialog.askopenfilename(parent=self.win, title="画像をえらぶ",
-                                          filetypes=[("画像", "*.png *.webp *.jpg *.jpeg *.gif"), ("すべて", "*.*")])
-        if not path:
-            return
-        name = simpledialog.askstring("名前", "名前をつけてください", parent=self.win,
-                                      initialvalue=os.path.splitext(os.path.basename(path))[0])
-        if not name:
-            return
-        chara = messagebox.askyesno("しゅるい", "キャラにしますか？\n\nはい：机の奥から顔を出せるキャラ\n"
-                                    "いいえ：机の上に置く小物", parent=self.win)
-        h = simpledialog.askinteger("大きさ", "高さ（ペットの絵の px。目安：小物 20〜40、キャラ 40〜60）",
-                                    parent=self.win, initialvalue=46 if chara else 26, minvalue=6, maxvalue=150)
-        if not h:
-            return
-        try:
-            jisaku.cutout(path)
-        except Exception as ex:                      # 画像として読めない
-            messagebox.showerror("自作", f"画像を読めませんでした：{ex}", parent=self.win)
-            return
-        e = jisaku.add_item(path, name, "chara" if chara else "item", h)
-        self.app.custom_items_changed()
-        self.app.add_item("custom:" + e["id"])
-        self.fill_tree()
-
-    def place_custom(self):
-        iid = self.selected_custom()
-        if iid:
-            self.app.add_item("custom:" + iid)
-
-    def resize_custom(self):
-        iid = self.selected_custom()
-        if not iid:
-            return
-        e = next((e for e in jisaku.load_items() if e["id"] == iid), None)
-        h = simpledialog.askinteger("大きさ", "高さ（ペットの絵の px）", parent=self.win,
-                                    initialvalue=e["height"] if e else 30, minvalue=6, maxvalue=150)
-        if h:
-            jisaku.set_item_height(iid, h)
-            self.app.custom_items_changed()
-            self.fill_tree()
-
-    def remove_custom(self):
-        iid = self.selected_custom()
-        if iid and messagebox.askyesno("けす", "この画像をけしますか？（机の上からも消えます）", parent=self.win):
-            jisaku.remove_item(iid)
-            self.app.custom_items_changed()
-            self.fill_tree()
 
     def reset_hand(self):
         for key, v in self.hand.items():
@@ -2097,8 +1956,7 @@ class CharaEditor:
     def changed(self):
         jisaku.save_chara(self.c)
         self.refresh()
-        if is_custom():
-            self.app.design_changed()
+        self.app.design_changed()
 
     def use(self):
         miss = jisaku.missing(self.c)
@@ -2108,119 +1966,6 @@ class CharaEditor:
         jisaku.save_chara(self.c)
         self.app.set_character("custom")
 
-
-# ============================================================
-#  ねこのみためを変える画面
-# ============================================================
-class LookEditor:
-    COLORS = [("FUR", "体の色"), ("CAP", "もよう・耳の色"), ("OUTLINE", "ふちの線"), ("EYE_LINE", "目の色"),
-              ("MOUTH_IN", "口の中"), ("MOLE_COLOR", "ほくろの色"), ("SHIRT", "ふく（トレーナー・着物）"), ("SHIRT_RIB", "えり・そで口"),
-              ("OBI", "帯（着物）"), ("PANTS", "ズボン・はかま")]
-    SLIDERS = [("EYE_LEN", "目の長さ", 6, 32, 1), ("EYE_TILT", "目のかたむき", -8, 10, 0.5),
-               ("EYE_Y", "目の高さ（下へ）", -8, 10, 0.5), ("EYE_GAP", "目と目のはなれ", 7, 20, 0.5),
-               ("HACHI_TOP", "八割れのてっぺん", -1.0, 0.2, 0.05), ("HACHI_SIDE", "八割れの横の高さ", -0.8, 0.6, 0.05),
-               ("HEAD_W", "頭のはば", 24, 38, 1), ("HEAD_H", "頭のたて", 17, 28, 1),
-               ("EAR_H", "耳の高さ", 18, 42, 1), ("EAR_SIZE", "耳の大きさ", 0.4, 1.8, 0.05),
-               ("MOUTH_Y", "口の高さ（下へ）", -2, 14, 0.5),
-               ("MOLE_X", "ほくろの横（右へ）", -28, 28, 0.5), ("MOLE_Y", "ほくろのたて（下へ）", -18, 18, 0.5),
-               ("MOLE_SIZE", "ほくろの大きさ", 0.4, 3, 0.1), ("OUTLINE_W", "ふちの太さ", 0.6, 3.2, 0.1)]
-    CHOICES = [("CHARACTER", "キャラ", [("ひと", "person"), ("ねこ", "cat"), ("自作", "custom")]),
-               ("PATTERN", "もよう", [("八割れ", "hachiware"), ("頭の上だけ", "cap"), ("なし", "none")]),
-               ("CLOTHES", "ふく", [("ふつうの服", "sweat"), ("着物", "kimono"), ("なし", "none")]),
-               ("MOUTH", "口", [("にこっ", "open"), ("ω", "w")]),
-               ("EYE_STYLE", "目", [("糸目", "itome"), ("まんまる", "round")])]
-    CHECKS = [("TAIL", "しっぽ"), ("SHOW_NOSE", "鼻"), ("MOLE", "ほくろ")]
-
-    def __init__(self, app):
-        self.app = app
-        w = self.win = tk.Toplevel(app.root)
-        w.title("ねこのみため")
-        w.attributes("-topmost", True)
-        w.resizable(False, False)
-        pad = dict(padx=6, pady=2)
-        self.swatches = {}
-        self.vars = {}
-
-        f = tk.LabelFrame(w, text="色（クリックでえらぶ）")
-        f.grid(row=0, column=0, sticky="nsew", **pad)
-        for i, (key, label) in enumerate(self.COLORS):
-            tk.Label(f, text=label).grid(row=i, column=0, sticky="w")
-            b = tk.Button(f, width=6, relief="groove", command=lambda k=key: self.pick(k))
-            b.grid(row=i, column=1, **pad)
-            self.swatches[key] = b
-        self.collar = tk.BooleanVar(value=bool(N.COLLAR))
-        tk.Checkbutton(f, text="赤い首輪", variable=self.collar, command=self.collar_changed).grid(
-            row=len(self.COLORS), column=0, columnspan=2, sticky="w")
-
-        g = tk.LabelFrame(w, text="形")
-        g.grid(row=0, column=1, rowspan=2, sticky="nsew", **pad)
-        for i, (key, label, lo, hi, step) in enumerate(self.SLIDERS):
-            tk.Label(g, text=label).grid(row=i, column=0, sticky="w")
-            v = tk.DoubleVar(value=getattr(N, key))
-            sc = tk.Scale(g, from_=lo, to=hi, resolution=step, orient="horizontal", length=170,
-                          variable=v, showvalue=True, command=lambda _v, k=key: self.slid(k))
-            sc.grid(row=i, column=1)
-            self.vars[key] = v
-
-        h = tk.LabelFrame(w, text="えらぶ")
-        h.grid(row=1, column=0, sticky="nsew", **pad)
-        r = 0
-        for key, label, opts in self.CHOICES:
-            tk.Label(h, text=label).grid(row=r, column=0, sticky="w")
-            v = tk.StringVar(value=getattr(N, key))
-            for j, (text, val) in enumerate(opts):
-                tk.Radiobutton(h, text=text, value=val, variable=v,
-                               command=lambda k=key: self.set(k, self.vars[k].get())).grid(row=r, column=1 + j, sticky="w")
-            self.vars[key] = v
-            r += 1
-        for key, label in self.CHECKS:
-            v = tk.BooleanVar(value=bool(getattr(N, key)))
-            tk.Checkbutton(h, text=label, variable=v, command=lambda k=key: self.set(k, self.vars[k].get())).grid(
-                row=r, column=0, columnspan=2, sticky="w")
-            self.vars[key] = v
-            r += 1
-
-        bar = tk.Frame(w)
-        bar.grid(row=2, column=0, columnspan=2, sticky="e", **pad)
-        tk.Button(bar, text="はじめのみためにもどす", command=self.reset).pack(side="left", padx=4)
-        tk.Button(bar, text="とじる", command=w.destroy).pack(side="left", padx=4)
-        self.refresh()
-
-    def hexcol(self, c):
-        return "#%02x%02x%02x" % tuple(int(v) for v in c) if c else "#dddddd"
-
-    def refresh(self):
-        for key, b in self.swatches.items():
-            c = self.hexcol(getattr(N, key))
-            b.config(bg=c, activebackground=c)
-        for key, v in self.vars.items():
-            v.set(getattr(N, key))
-        self.collar.set(bool(N.COLLAR))
-
-    def set(self, key, value):
-        if isinstance(value, float) and value.is_integer() and isinstance(N.DEFAULTS.get(key), int) \
-                and not isinstance(N.DEFAULTS.get(key), bool):
-            value = int(value)
-        N.save_settings({key: value})
-        self.app.design_changed()
-
-    def slid(self, key):
-        self.set(key, float(self.vars[key].get()))
-
-    def pick(self, key):
-        cur = getattr(N, key) or (200, 200, 200)
-        res = colorchooser.askcolor(color=self.hexcol(cur), parent=self.win, title="色をえらぶ")
-        if res and res[0]:
-            self.set(key, tuple(int(v) for v in res[0]))
-            self.refresh()
-
-    def collar_changed(self):
-        self.set("COLLAR", (214, 64, 44) if self.collar.get() else None)
-
-    def reset(self):
-        N.reset_settings()
-        self.refresh()
-        self.app.design_changed()
 
 
 def preview(path):
